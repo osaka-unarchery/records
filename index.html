@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アーチェリー部 記録管理システム</title>
+    
+    <!-- 検索結果に表示させないための設定 -->
+    <meta name="robots" content="noindex, nofollow">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f4f7f6; font-size: 14px; color: #333; }
+        #loginScreen { height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+        .nav-container { background: #6c757d; padding: 10px; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav-container label { color: #e9ecef; font-size: 0.75rem; font-weight: bold; margin-left: 5px; display: block; margin-top: 5px; }
+        
+        .mode-switch { background: #5a6268; border-radius: 8px; padding: 5px; margin-bottom: 10px; display: flex; gap: 5px; }
+        .mode-btn { flex: 1; border: none; padding: 8px; border-radius: 5px; font-size: 0.85rem; background: transparent; color: #ccc; transition: 0.3s; }
+        .mode-btn.active { background: #fff; color: #333; font-weight: bold; }
+        
+        .match-card { border-radius: 12px; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 15px; background: #fff; overflow: hidden; display: none; }
+        .table-responsive-container { overflow-x: auto; -webkit-overflow-scrolling: touch; background: white; border-radius: 8px; border: 1px solid #dee2e6; display: none; }
+        table { min-width: 550px; margin-bottom: 0 !important; }
+        th { background-color: #d1d5db !important; color: #4b5563; text-align: center; font-weight: bold; white-space: nowrap;}
+        td { text-align: center; vertical-align: middle; white-space: nowrap;}
+        tr:nth-child(even) { background-color: #f9fafb; }
+
+        /* 勝敗・色の定義 */
+        .res-badge { font-weight: bold; padding: 4px 14px; border-radius: 50px; font-size: 0.85rem; color: #fff; display: inline-block; }
+        .res-win { background-color: #0d6efd; } /* 青 */
+        .res-lose { background-color: #dc3545; } /* 赤 */
+        .res-gold { background: linear-gradient(135deg, #CFB53B, #F1D35A); color: #fff; text-shadow: 1px 1px 1px rgba(0,0,0,0.2); } /* 金 */
+        .res-silver { background: linear-gradient(135deg, #A9A9A9, #E0E0E0); color: #333; } /* 銀 */
+        .res-etc { background-color: #6c757d; }
+
+        /* 「新」を含むコメント（金色） */
+        .res-comment-gold { color: #B8860B; font-weight: bold; margin-left: 10px; font-size: 0.9rem; }
+
+        .stat-box { text-align: center; padding: 10px; border-radius: 8px; background: #f8f9fa; flex: 1; border: 1px solid #eee; }
+        .stat-val { font-size: 1.3rem; font-weight: bold; display: block; }
+        .stat-label { font-size: 0.7rem; color: #666; font-weight: bold; }
+        
+        .chart-wrapper { position: relative; height: 180px; width: 100%; margin-bottom: 20px; }
+        .chart-title { font-size: 0.8rem; font-weight: bold; color: #666; margin-bottom: 5px; margin-left: 5px; border-left: 3px solid #6c757d; padding-left: 8px; }
+        .empty-msg { text-align: center; color: #999; margin-top: 50px; }
+    </style>
+</head>
+<body>
+
+<div id="loginScreen" class="container">
+    <h1 class="h4 mb-4 text-secondary">Archery Record System</h1>
+    <div class="card p-4 shadow-sm w-100" style="max-width: 400px; border-radius: 15px;">
+        <label class="form-label fw-bold">合言葉を入力</label>
+        <input type="password" id="passwordInput" class="form-control form-control-lg mb-3" placeholder="パスワード">
+        <button id="loginBtn" class="btn btn-primary btn-lg w-100" onclick="fetchData()">データを見る</button>
+        <div id="loginError" class="text-danger mt-2 small" style="display: none;"></div>
+    </div>
+</div>
+
+<div id="mainApp" style="display: none;">
+    <div class="nav-container">
+        <div class="container">
+            <div class="mode-switch">
+                <button id="modeMatchBtn" class="mode-btn active" onclick="switchMode('match')">試合</button>
+                <button id="modePlayerBtn" class="mode-btn" onclick="switchMode('player')">個人</button>
+            </div>
+            
+            <div id="matchSelectors">
+                <label>幹部代を選択</label>
+                <select id="eraSelector" class="form-select form-select-sm mb-2"></select>
+                <label>試合を選択</label>
+                <select id="matchSelector" class="form-select form-select-sm"></select>
+            </div>
+
+            <div id="playerSelectors" style="display: none;">
+                <label>選手を選択</label>
+                <select id="playerSelector" class="form-select form-select-sm mb-2"></select>
+                <label>年度(幹部代)を選択</label>
+                <select id="playerEraFilter" class="form-select form-select-sm"></select>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mt-3">
+        <!-- 試合モード -->
+        <div id="sectionMatch">
+            <div id="matchMsg" class="empty-msg">幹部代を選択してください</div>
+            <div id="matchCard" class="card match-card p-3">
+                <div id="matchHeaderInfo" class="text-center text-muted small fw-bold mb-2"></div>
+                <div class="text-center mb-2">
+                    <span id="matchScoreDisplay" class="fw-bold fs-5"></span>
+                </div>
+                <div class="d-flex justify-content-center align-items-center">
+                    <span id="matchResultBadge" class="res-badge"></span>
+                    <span id="matchSpecialComment" class="res-comment-gold"></span>
+                </div>
+            </div>
+            <div id="matchTableCont" class="table-responsive-container">
+                <table class="table table-sm">
+                    <thead><tr><th>的番</th><th>氏名</th><th>学年</th><th>50m</th><th>30m</th><th>Total</th><th>備考</th></tr></thead>
+                    <tbody id="matchTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 個人モード -->
+        <div id="sectionPlayer" style="display: none;">
+            <div id="playerMsg" class="empty-msg">選手を選択してください</div>
+            <div id="playerCard" class="card match-card p-3">
+                <h5 id="playerNameDisplay" class="text-center fw-bold mb-3"></h5>
+                <div class="d-flex justify-content-around gap-2 mb-4">
+                    <div class="stat-box"><span class="stat-label">最高点</span><span id="statMax" class="stat-val text-primary">-</span></div>
+                    <div class="stat-box"><span class="stat-label">平均点</span><span id="statAvg" class="stat-val text-success">-</span></div>
+                    <div class="stat-box"><span class="stat-label">最低点</span><span id="statMin" class="stat-val text-danger">-</span></div>
+                </div>
+                <div class="chart-title">Total 推移</div>
+                <div class="chart-wrapper"><canvas id="chartTotal"></canvas></div>
+                <div class="chart-title">50m 推移</div>
+                <div class="chart-wrapper"><canvas id="chart50"></canvas></div>
+                <div class="chart-title">30m 推移</div>
+                <div class="chart-wrapper"><canvas id="chart30"></canvas></div>
+            </div>
+            <div id="playerTableCont" class="table-responsive-container">
+                <table class="table table-sm">
+                    <thead><tr><th>日付</th><th>試合名</th><th>的番</th><th>50m</th><th>30m</th><th>Total</th><th>備考</th></tr></thead>
+                    <tbody id="playerTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyG9Uy7bPXm1RGHe1uSP5PbluOJDmO1DUYnjOjWqH8ubi5J2qpkt31E1mhL_FYAY71G/exec';
+
+let dbByMatch = {};
+let dbByPlayer = {};
+let playerKanaMap = {};
+let charts = { total: null, m50: null, m30: null };
+
+async function fetchData() {
+    const pwd = document.getElementById('passwordInput').value;
+    const btn = document.getElementById('loginBtn');
+    if(!pwd) return;
+    btn.innerText = "読み込み中...";
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`${GAS_URL}?key=${encodeURIComponent(pwd)}`);
+        const result = await response.json();
+        if (result.error) {
+            document.getElementById('loginError').innerText = result.error;
+            document.getElementById('loginError').style.display = 'block';
+            btn.innerText = "データを見る"; btn.disabled = false;
+        } else {
+            processData(result.data);
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+        }
+    } catch (e) { btn.innerText = "データを見る"; btn.disabled = false; }
+}
+
+function processData(rows) {
+    dbByMatch = {}; dbByPlayer = {}; playerKanaMap = {};
+    rows.forEach(cols => {
+        if (cols.length < 20 || cols[0] === '幹部代' || !cols[18]) return;
+        
+        const era = cols[0].trim();
+        const sValue = cols[18].trim();
+        const pName = cols[12] ? cols[12].trim() : "";
+        const pKana = cols[19] ? cols[19].trim() : pName;
+        const note = cols[17] ? cols[17].trim() : "";
+        const colK = cols[10] ? cols[10].trim() : "";
+
+        if (pName && !playerKanaMap[pName]) playerKanaMap[pName] = pKana;
+
+        if (!dbByMatch[era]) dbByMatch[era] = {};
+        if (!dbByMatch[era][sValue]) {
+            dbByMatch[era][sValue] = { 
+                title: cols[2], date: cols[3], opp: cols[4], oppScore: cols[5], 
+                ourScore: cols[6], result: cols[8], venue: cols[9], 
+                players: [], specialComment: "" 
+            };
+        }
+        
+        if (colK === '合計' && note.includes("新")) {
+            dbByMatch[era][sValue].specialComment = note;
+        }
+
+        if (colK !== '合計' && pName) {
+            const pObj = { 
+                name: pName, grade: cols[13], target: cols[10], 
+                m50: parseInt(cols[14]) || 0, m30: parseInt(cols[15]) || 0, 
+                total: parseInt(cols[16]) || 0, note: note 
+            };
+            dbByMatch[era][sValue].players.push(pObj);
+
+            if (!dbByPlayer[pName]) dbByPlayer[pName] = [];
+            dbByPlayer[pName].push({ era, date: cols[3], matchName: cols[2], isExcluded: note.includes("交代"), ...pObj });
+        }
+    });
+    initMatchSelectors();
+    initPlayerSelectors();
+}
+
+function switchMode(mode) {
+    document.getElementById('sectionMatch').style.display = (mode === 'match') ? 'block' : 'none';
+    document.getElementById('matchSelectors').style.display = (mode === 'match') ? 'block' : 'none';
+    document.getElementById('sectionPlayer').style.display = (mode === 'player') ? 'block' : 'none';
+    document.getElementById('playerSelectors').style.display = (mode === 'player') ? 'block' : 'none';
+    document.getElementById('modeMatchBtn').classList.toggle('active', mode === 'match');
+    document.getElementById('modePlayerBtn').classList.toggle('active', mode === 'player');
+}
+
+function initMatchSelectors() {
+    const eraSelect = document.getElementById('eraSelector');
+    const eras = Object.keys(dbByMatch).sort(); 
+    eraSelect.innerHTML = '<option value="">選択してください</option>';
+    eras.forEach(e => eraSelect.add(new Option(e, e)));
+    
+    eraSelect.onchange = () => {
+        const matchSelect = document.getElementById('matchSelector');
+        matchSelect.innerHTML = '<option value="">選択してください</option>';
+        if (eraSelect.value) {
+            const matches = dbByMatch[eraSelect.value];
+            const sortedMatchKeys = Object.keys(matches).sort((a, b) => new Date(matches[a].date) - new Date(matches[b].date));
+            sortedMatchKeys.forEach(k => matchSelect.add(new Option(k, k)));
+            
+            if(sortedMatchKeys.length > 0) {
+                matchSelect.value = sortedMatchKeys[0];
+                renderMatchTable(eraSelect.value, sortedMatchKeys[0]);
+            }
+        }
+    };
+    document.getElementById('matchSelector').onchange = () => {
+        renderMatchTable(eraSelect.value, document.getElementById('matchSelector').value);
+    };
+}
+
+function renderMatchTable(era, sValue) {
+    if (!era || !sValue) return;
+    const data = dbByMatch[era][sValue];
+    document.getElementById('matchMsg').style.display = 'none';
+    document.getElementById('matchCard').style.display = 'block';
+    document.getElementById('matchTableCont').style.display = 'block';
+    
+    document.getElementById('matchHeaderInfo').innerText = `${data.date} ${data.title} @ ${data.venue}`;
+    document.getElementById('matchScoreDisplay').innerText = `${data.opp} ${data.oppScore} vs 阪大 ${data.ourScore}`;
+    
+    const badge = document.getElementById('matchResultBadge');
+    const res = data.result;
+    badge.innerText = res;
+    badge.className = 'res-badge';
+    if (res.includes('昇格') || res.includes('優勝')) badge.classList.add('res-gold');
+    else if (res.includes('二位')) badge.classList.add('res-silver');
+    else if (res.includes('勝ち')) badge.classList.add('res-win');
+    else if (res.includes('負け') || res.includes('降格')) badge.classList.add('res-lose');
+    else badge.classList.add('res-etc');
+
+    document.getElementById('matchSpecialComment').innerText = data.specialComment || "";
+
+    document.getElementById('matchTableBody').innerHTML = data.players.map(p => `
+        <tr>
+            <td>${p.target}</td><td class="text-start">${p.name}</td>
+            <td>${p.grade}</td><td>${p.m50||'-'}</td><td>${p.m30||'-'}</td>
+            <td class="fw-bold">${p.total||'-'}</td><td>${p.note}</td>
+        </tr>`).join('');
+}
+
+function initPlayerSelectors() {
+    const playerSelect = document.getElementById('playerSelector');
+    const sortedNames = Object.keys(dbByPlayer).sort((a, b) => {
+        const kanaA = playerKanaMap[a] || a;
+        const kanaB = playerKanaMap[b] || b;
+        return kanaA.localeCompare(kanaB, 'ja');
+    });
+
+    playerSelect.innerHTML = '<option value="">選択してください</option>';
+    sortedNames.forEach(name => playerSelect.add(new Option(name, name)));
+
+    playerSelect.onchange = () => {
+        const name = playerSelect.value;
+        const eraF = document.getElementById('playerEraFilter');
+        const prevEra = eraF.value;
+        
+        eraF.innerHTML = '<option value="ALL">全期間を表示</option>';
+        if (name) {
+            const eras = [...new Set(dbByPlayer[name].map(d => d.era))].sort();
+            eras.forEach(e => eraF.add(new Option(e, e)));
+            if (!prevEra || prevEra === "") eraF.value = "ALL";
+            else eraF.value = prevEra; 
+            updatePlayerDisplay();
+        }
+    };
+    document.getElementById('playerEraFilter').onchange = updatePlayerDisplay;
+}
+
+function updatePlayerDisplay() {
+    const name = document.getElementById('playerSelector').value;
+    const era = document.getElementById('playerEraFilter').value;
+    if (!name || !era) return;
+
+    let allData = dbByPlayer[name].sort((a,b) => new Date(a.date) - new Date(b.date));
+    if (era !== 'ALL') allData = allData.filter(d => d.era === era);
+
+    const filteredData = allData.filter(d => !d.isExcluded);
+
+    document.getElementById('playerMsg').style.display = 'none';
+    document.getElementById('playerCard').style.display = 'block';
+    document.getElementById('playerTableCont').style.display = 'block';
+    document.getElementById('playerNameDisplay').innerText = name;
+
+    const totals = filteredData.map(d => d.total).filter(t => t > 0);
+    if(totals.length > 0) {
+        document.getElementById('statMax').innerText = Math.max(...totals);
+        document.getElementById('statMin').innerText = Math.min(...totals);
+        document.getElementById('statAvg').innerText = (totals.reduce((a,b)=>a+b)/totals.length).toFixed(1);
+    } else {
+        document.getElementById('statMax').innerText = document.getElementById('statMin').innerText = document.getElementById('statAvg').innerText = "-";
+    }
+
+    renderLineChart('chartTotal', 'total', filteredData, '#0d6efd');
+    renderLineChart('chart50', 'm50', filteredData, '#fd7e14');
+    renderLineChart('chart30', 'm30', filteredData, '#20c997');
+
+    document.getElementById('playerTableBody').innerHTML = allData.slice().reverse().map(d => `
+        <tr class="${d.isExcluded ? 'text-muted' : ''}">
+            <td>${d.date}</td>
+            <td class="text-start">${d.matchName}</td>
+            <td>${d.target||'-'}</td>
+            <td>${d.m50||'-'}</td>
+            <td>${d.m30||'-'}</td>
+            <td class="fw-bold">${d.total||'-'}</td>
+            <td>${d.note}</td>
+        </tr>`).join('');
+}
+
+function renderLineChart(canvasId, key, data, color) {
+    const ctx = document.getElementById(canvasId);
+    if (charts[key]) charts[key].destroy();
+    charts[key] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.date.split('/').slice(1).join('/')),
+            datasets: [{ data: data.map(d => d[key]), borderColor: color, tension: 0.3, fill: false, pointRadius: 4 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+}
+</script>
+</body>
+</html>
