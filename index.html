@@ -283,14 +283,13 @@ function initPlayerSelectors() {
     playerSelect.onchange = () => {
         const name = playerSelect.value;
         const eraF = document.getElementById('playerEraFilter');
-        const prevEra = eraF.value;
         
         eraF.innerHTML = '<option value="ALL">全期間を表示</option>';
         if (name) {
             const eras = [...new Set(dbByPlayer[name].map(d => d.era))].sort();
             eras.forEach(e => eraF.add(new Option(e, e)));
-            if (!prevEra || prevEra === "") eraF.value = "ALL";
-            else eraF.value = prevEra; 
+            // 選手が変わったときは必ず「全期間」をデフォルトにする
+            eraF.value = "ALL";
             updatePlayerDisplay();
         }
     };
@@ -305,6 +304,7 @@ function updatePlayerDisplay() {
     let allData = dbByPlayer[name].sort((a,b) => new Date(a.date) - new Date(b.date));
     if (era !== 'ALL') allData = allData.filter(d => d.era === era);
 
+    // グラフと統計には交代（isExcluded）を含めない
     const filteredData = allData.filter(d => !d.isExcluded);
 
     document.getElementById('playerMsg').style.display = 'none';
@@ -325,6 +325,7 @@ function updatePlayerDisplay() {
     renderLineChart('chart50', 'm50', filteredData, '#fd7e14');
     renderLineChart('chart30', 'm30', filteredData, '#20c997');
 
+    // 表には全データを表示（交代分はグレーアウト）
     document.getElementById('playerTableBody').innerHTML = allData.slice().reverse().map(d => `
         <tr class="${d.isExcluded ? 'text-muted' : ''}">
             <td>${d.date}</td>
